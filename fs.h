@@ -29,6 +29,11 @@ private:
     Disk disk;
     // size of a FAT entry is 2 bytes
     int16_t fat[BLOCK_SIZE/2];
+    void updateFat();
+    void clearDiskBlock(int blk);
+    bool fileExists(std::string fileName);
+    bool fileReadable(std::string fileName, int &first_blk);
+    std::string readFile(std::string fileName);
 
 public:
     FS();

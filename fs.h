@@ -2,6 +2,9 @@
 #include <cstdint>
 #include "disk.h"
 
+//Self includes
+#include <vector>
+
 #ifndef __FS_H__
 #define __FS_H__
 
@@ -24,6 +27,13 @@ struct dir_entry {
     uint8_t access_rights; // read (0x04), write (0x02), execute (0x01)
 };
 
+//Self made struct
+struct directory {
+    int block;
+    std::string name;
+    std::string parent;
+};
+
 class FS {
 private:
     Disk disk;
@@ -31,14 +41,18 @@ private:
     int16_t fat[BLOCK_SIZE/2];
 
     //Self-made variables
-    int currentDirectory = ROOT_BLOCK;
+    directory currentDirectory;
+    std::vector<directory> directoryList;
 
     //Self-made functions
     void updateFat();
     void clearDiskBlock(int blk);
-    bool fileExists(std::string fileName);
+    bool fileExists(int dir, std::string fileName);
+    bool directoryExists(int dir, std::string dirName, int& dirBlock);
     bool fileReadable(std::string fileName, int &first_blk);
     std::string readFile(std::string fileName);
+    int copyFile(std::string fileData, std::string destName, int destDir);
+    std::string getFileDirectoryAndName(std::string filePath, int& dir);
 
 public:
     FS();

@@ -9,9 +9,6 @@
 FS::FS()
 {
     std::cout << "FS::FS()... Creating file system\n"; // Remove
-    currentDirectory.block = ROOT_BLOCK;
-    currentDirectory.name = "/";
-    currentDirectory.parent = "";
 }
 
 FS::~FS()
@@ -170,7 +167,6 @@ std::string FS::readFile(std::string fileName)
 
 int FS::copyFile(std::string fileData, std::string destName, int destDir)
 {
-
     // Check if the fileName is too big for the buffer.
     if (destName.size() > 55)
     {
@@ -284,11 +280,6 @@ int FS::copyFile(std::string fileData, std::string destName, int destDir)
     return 0;
 }
 
-std::string FS::getFileDirectoryAndName(std::string filePath, int &dir)
-{
-    return std::string();
-}
-
 // formats the disk, i.e., creates an empty file system
 int FS::format()
 {
@@ -313,9 +304,15 @@ int FS::format()
     directoryList.clear();
     directory root;
     root.block = ROOT_BLOCK;
-    root.name = "/";
-    root.parent = "";
+    std::string name = "/";
+    std::string parent = "";
+    strcpy(root.name, name.c_str());
+    strcpy(root.parent, parent.c_str());
     directoryList.push_back(root);
+
+    currentDirectory.block = ROOT_BLOCK;
+    strcpy(currentDirectory.name, name.c_str());
+    strcpy(currentDirectory.parent, parent.c_str());
 
     return 0;
 }
@@ -678,7 +675,6 @@ int FS::cp(std::string sourcepath, std::string destpath)
             return -2;
         }
     }
-
     return 0;
 }
 

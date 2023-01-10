@@ -30,8 +30,8 @@ struct dir_entry {
 //Self made struct
 struct directory {
     int block;
-    std::string name;
-    std::string parent;
+    char name[256];
+    char parent[256];
 };
 
 class FS {
@@ -52,7 +52,6 @@ private:
     bool fileReadable(std::string fileName, int &first_blk);
     std::string readFile(std::string fileName);
     int copyFile(std::string fileData, std::string destName, int destDir);
-    std::string getFileDirectoryAndName(std::string filePath, int& dir);
 
 public:
     FS();

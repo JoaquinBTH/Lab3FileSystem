@@ -29,6 +29,11 @@ private:
     Disk disk;
     // size of a FAT entry is 2 bytes
     int16_t fat[BLOCK_SIZE/2];
+
+    //Self-made variables
+    int currentDirectory = ROOT_BLOCK;
+
+    //Self-made functions
     void updateFat();
     void clearDiskBlock(int blk);
     bool fileExists(std::string fileName);

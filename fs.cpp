@@ -32,7 +32,7 @@ void FS::clearDiskBlock(int blk)
 {
     char blankBlock[BLOCK_SIZE];
     memset(blankBlock, ' ', BLOCK_SIZE);
-    disk.write(blk, (uint8_t *)blankBlock);
+    disk.write(blk, (uint8_t *)&blankBlock);
 }
 
 //Checks if a file exists in the directory or not.
@@ -41,11 +41,12 @@ bool FS::fileExists(std::string fileName)
     bool rValue = false;
 
     //Get the data from the current directory and convert it to a string.
-    std::string directoryText;
-    disk.read(ROOT_BLOCK, (uint8_t *)&directoryText);
+    char directoryText[BLOCK_SIZE];
+    disk.read(currentDirectory, (uint8_t *)&directoryText);
+    std::string dirText = directoryText;
 
     //Check if the fileName exists in the directory
-    if(directoryText.find(fileName) != std::string::npos)
+    if(dirText.find(fileName) != std::string::npos)
     {
         rValue = true;
     }
@@ -59,12 +60,16 @@ bool FS::fileReadable(std::string fileName, int &first_blk)
     bool rValue = false;
 
     //Get the data from the current directory and convert it to a string.
-    std::string directoryText;
-    disk.read(ROOT_BLOCK, (uint8_t *)&directoryText);
+    char directoryText[BLOCK_SIZE];
+    disk.read(currentDirectory, (uint8_t *)&directoryText);
+    char issText[BLOCK_SIZE + 1];
+    memcpy(issText, directoryText, BLOCK_SIZE);
+    issText[BLOCK_SIZE] = '\0';
+    std::string dirText = issText; //String needed for .find function.
 
     //Define stringstream to read each word after the position of fileName.
-    std::istringstream iss(directoryText);
-    iss.seekg(directoryText.find(fileName), std::ios_base::beg);
+    std::istringstream iss(issText);
+    iss.seekg(dirText.find(fileName), std::ios_base::beg);
 
     std::string word;
     iss >> word; //FileName
@@ -90,12 +95,20 @@ std::string FS::readFile(std::string fileName)
     if(fileReadable(fileName, blk))
     {
         //Add content to rString until FAT_EOF is reached.
-        std::string content;
+        char diskContent[BLOCK_SIZE];
+        char addContent[BLOCK_SIZE + 1];
         bool eof = false;
         while(!eof)
         {
-            disk.read(blk, (uint8_t *)&content);
-            rString += content;
+            disk.read(blk, (uint8_t *)&diskContent);
+            memcpy(addContent, diskContent, BLOCK_SIZE);
+            addContent[BLOCK_SIZE] = '\0';
+            std::istringstream iss(addContent);
+            std::string word;
+            while(iss >> word)
+            {
+                rString += word + " ";
+            }
             if(fat[blk] == FAT_EOF)
             {
                 eof = true;
@@ -115,10 +128,6 @@ FS::format()
 {
     std::cout << "FS::format()\n"; //Remove
 
-    //Define a blank block for the initialization of the disk.
-    char blankBlock[BLOCK_SIZE];
-    memset(blankBlock, ' ', BLOCK_SIZE);
-
     //Initialize all the blocks in the FAT as free except block 0 and block 1
     for(int i = 0; i < BLOCK_SIZE / 2; i++)
     {
@@ -135,7 +144,6 @@ FS::format()
         clearDiskBlock(i);
     }
 
-
     return 0;
 }
 
@@ -149,6 +157,32 @@ FS::create(std::string filepath)
     //Check if no file with the same name exists.
     if(!fileExists(filepath))
     {
+        //Check if the fileName is too big for the buffer.
+        if(filepath.size() > 55)
+        {
+            std::cout << "Error: Filename too big" << std::endl;
+            return -2;
+        }
+
+        //Check if the directory is full or not (64 entries max per directory).
+        char directoryText[BLOCK_SIZE];
+        disk.read(currentDirectory, (uint8_t *)&directoryText);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+        std::istringstream iss(issText);
+        std::string word;
+        int entries = 0;
+        while(iss >> word)
+        {
+            entries++;
+        }
+        if(entries/5 > 63)
+        {
+            std::cout << "Error: Directory full" << std::endl;
+            return -3;
+        }
+
         //Let the user fill up the file data until it notices an empty line.
         std::string fileData;
         std::string input;
@@ -178,6 +212,10 @@ FS::create(std::string filepath)
 
         //2.
         int freeDiskBlockIndex[reqDiskBlocks];
+        for(int i = 0; i < reqDiskBlocks; i++)
+        {
+            freeDiskBlockIndex[i] = 0;
+        }
         int arrayIndex = 0;
         for(int i = 2; i < (BLOCK_SIZE / 2); i++) //First two blocks are never available.
         {
@@ -196,7 +234,7 @@ FS::create(std::string filepath)
         if(freeDiskBlockIndex[(reqDiskBlocks - 1)] == 0) //Amount of free disk blocks required couldn't be found.
         {
             std::cout << "Error: Not enough free disk slots" << std::endl;
-            return -2;
+            return -4;
         }
 
         //3.
@@ -221,13 +259,14 @@ FS::create(std::string filepath)
         }   
 
         //5.
-        std::string dir_addition = fileEntry.file_name + '\n' + std::to_string(fileEntry.size) + '\n' + std::to_string(fileEntry.first_blk) + '\n' +
+        std::string dirNew = fileEntry.file_name; //Otherwise name doesn't get added for some reason.
+        dirNew += '\n' + std::to_string(fileEntry.size) + '\n' + std::to_string(fileEntry.first_blk) + '\n' +
                         std::to_string(fileEntry.type) + '\n' + std::to_string(fileEntry.access_rights) + '\n';
-        char dir_original[BLOCK_SIZE];
-        disk.read(ROOT_BLOCK, (uint8_t *)dir_original);
-        dir_addition += dir_original;
-        clearDiskBlock(ROOT_BLOCK);
-        disk.write(ROOT_BLOCK, (uint8_t *)dir_addition.c_str());
+        char dirOriginal[BLOCK_SIZE];
+        disk.read(currentDirectory, (uint8_t *)&dirOriginal);
+        dirNew += dirOriginal;
+        clearDiskBlock(currentDirectory);
+        disk.write(currentDirectory, (uint8_t *)dirNew.c_str());
 
         //6.
         for(int i = 0; i < reqDiskBlocks; i++)
@@ -285,7 +324,76 @@ FS::cat(std::string filepath)
 int
 FS::ls()
 {
-    std::cout << "FS::ls()\n"; //Remove
+    std::string content = "Name\tSize\tF_Block\tType\tRWX\n";
+
+    char directoryText[BLOCK_SIZE];
+    disk.read(currentDirectory, (uint8_t *)&directoryText);
+    char issText[BLOCK_SIZE + 1];
+    memcpy(issText, directoryText, BLOCK_SIZE);
+    issText[BLOCK_SIZE] = '\0'; //Stringstream uses null termination, otherwise unwanted characters can get added.
+
+    std::istringstream iss(issText);
+    std::string word;
+    int index = 0;
+    while(iss >> word)
+    {
+        switch(index)
+        {
+        case 0:
+            content += word + "\t"; //Name
+            break;
+        case 1:
+            content += word + "\t"; //Size
+            break;
+        case 2:
+            content += word + "\t"; //InitBlock
+            break;
+        case 3:
+            if(word == "0")
+            {
+                content += "F\t"; //Type: File
+            }
+            else
+            {
+                content += "D\t"; //Type: Directory
+            }
+            break;
+        case 4:
+            int Rights = std::stoi(word);
+            switch(Rights)
+            {
+            case 1:
+                content += "--X\n"; //Execute
+                break;
+            case 2:
+                content += "-W-\n"; //Write
+                break;
+            case 3:
+                content += "-WX\n"; //Write-Execute
+                break;
+            case 4:
+                content += "R--\n"; //Read
+                break;
+            case 5:
+                content += "R-X\n"; //Read-Execute
+                break;
+            case 6:
+                content += "RW-\n"; //Read-Write
+                break;
+            case 7:
+                content += "RWX\n"; //Read-Write-Execute
+                break;
+            }
+            break;
+        }
+        index++;
+        if(index > 4)
+        {
+            index = 0;
+        }
+    }
+
+    std::cout << content;
     return 0;
 }
 

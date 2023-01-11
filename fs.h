@@ -3,6 +3,7 @@
 #include "disk.h"
 
 //Self includes
+#include <string.h>  //Strncpy etc...
 #include <vector>
 
 #ifndef __FS_H__
@@ -30,8 +31,12 @@ struct dir_entry {
 //Self made struct
 struct directory {
     int block;
-    char name[256];
-    char parent[256];
+    std::string name;
+    std::string parent;
+
+    directory() : block(0), name(""), parent("") { }
+
+    directory(int b, std::string n, std::string p) : block(b), name(n), parent(p) { }
 };
 
 class FS {
@@ -41,7 +46,7 @@ private:
     int16_t fat[BLOCK_SIZE/2];
 
     //Self-made variables
-    directory currentDirectory;
+    int currentDirectoryIndex = 0;
     std::vector<directory> directoryList;
 
     //Self-made functions

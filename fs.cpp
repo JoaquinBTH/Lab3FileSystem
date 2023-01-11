@@ -8,7 +8,6 @@
 
 FS::FS()
 {
-    std::cout << "FS::FS()... Creating file system\n"; // Remove
 }
 
 FS::~FS()
@@ -18,6 +17,7 @@ FS::~FS()
 // Updates the FAT block on the disk.
 void FS::updateFat()
 {
+    clearDiskBlock(FAT_BLOCK);
     std::string FAT = "";
     for (int i = 0; i < (BLOCK_SIZE / 2); i++)
     {
@@ -75,23 +75,24 @@ bool FS::directoryExists(int dir, std::string dirName, int &dirBlock)
     char issText[BLOCK_SIZE + 1];
     memcpy(issText, directoryText, BLOCK_SIZE);
     issText[BLOCK_SIZE] = '\0';
-    std::string dirText = issText; // String needed for .find function.
 
     // Define stringstream to read each word after the position of fileName.
     std::istringstream iss(issText);
-    iss.seekg(dirText.find(dirName), std::ios_base::beg);
-    std::string word;
-    for (int i = 0; i < 3; i++)
+    if (iss.str().find(dirName) != std::string::npos)
     {
+        iss.seekg(iss.str().find(dirName), std::ios_base::beg);
+        std::string word;
+        for (int i = 0; i < 3; i++)
+        {
+            iss >> word;
+        }
+        dirBlock = std::stoi(word);
         iss >> word;
-    }
-    dirBlock = std::stoi(word);
-    iss >> word;
 
-    // Check if the fileName exists in the directory
-    if ((dirText.find(dirName) != std::string::npos) && word == "1")
-    {
-        rValue = true;
+        if(word == "1") //If the type is directory
+        {
+            rValue = true;
+        }
     }
 
     return rValue;
@@ -147,11 +148,19 @@ std::string FS::readFile(std::string fileName)
             memcpy(addContent, diskContent, BLOCK_SIZE);
             addContent[BLOCK_SIZE] = '\0';
             std::istringstream iss(addContent);
+
+            std::string addString = diskContent;
+
+            rString += addString.substr(0, addString.size());
+            /*
             std::string word;
             while (iss >> word)
             {
                 rString += word + " ";
             }
+            word.pop_back(); // Erase the last space.
+            */
+
             if (fat[blk] == FAT_EOF)
             {
                 eof = true;
@@ -276,15 +285,165 @@ int FS::copyFile(std::string fileData, std::string destName, int destDir)
         }
     }
     updateFat();
-    
+
     return 0;
+}
+
+int FS::moveFile(std::string fileName, std::string newFileName, int destDir, bool rename)
+{
+    if (rename) // Reconstruct the directory and change the fileName to newFileName
+    {
+        char directoryText[BLOCK_SIZE];
+        disk.read(currentDirectory.block, (uint8_t *)&directoryText);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+
+        std::istringstream iss(issText);
+        std::string word;
+        std::string dirNew;
+
+        while (iss >> word)
+        {
+            if (word == fileName)
+            {
+                dirNew += newFileName + "\n";
+            }
+            else
+            {
+                dirNew += word + "\n";
+            }
+        }
+
+        clearDiskBlock(currentDirectory.block);
+        disk.write(currentDirectory.block, (uint8_t *)dirNew.c_str());
+    }
+    else // Reconstruct the directory that we're taking from to not have the file we want to move and then reconstruct the destDir to have that file instead.
+    {
+        // First check if the destDir has enough space
+        char directoryText[BLOCK_SIZE];
+        disk.read(destDir, (uint8_t *)&directoryText);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+        std::istringstream iss(issText);
+        std::string word;
+        int entries = 0;
+        while (iss >> word)
+        {
+            entries++;
+        }
+        if (entries / 5 > 63)
+        {
+            std::cout << "Error: Destination directory full" << std::endl;
+            return -3;
+        }
+
+        // Now reconstruct currentDirectory to not have the file and keep track of the file entry.
+        iss.str("");
+        memset(directoryText, ' ', BLOCK_SIZE);
+        memset(issText, ' ', BLOCK_SIZE + 1);
+        disk.read(currentDirectory.block, (uint8_t *)&directoryText);
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+
+        iss.str(issText);
+        word = "";
+        std::string dirNew;
+        std::string fileEntryInfo;
+        int index = 0;
+
+        // If fileName is found, put the file info into fileEntryInfo, otherwise fill the dirNew.
+        while (iss >> word)
+        {
+            if (word == fileName)
+            {
+                fileEntryInfo += word + "\n";
+                index++;
+            }
+            else if (index == 0)
+            {
+                dirNew += word + "\n";
+            }
+            else
+            {
+                fileEntryInfo += word + "\n";
+                index++;
+                if (index == 5)
+                {
+                    index = 0;
+                }
+            }
+        }
+
+        clearDiskBlock(currentDirectory.block);
+        disk.write(currentDirectory.block, (uint8_t *)dirNew.c_str());
+
+        // Now reconstruct the destDir to have the file in it.
+        char dirOriginal[BLOCK_SIZE];
+        disk.read(destDir, (uint8_t *)&dirOriginal);
+        fileEntryInfo += dirOriginal;
+        clearDiskBlock(destDir);
+        disk.write(destDir, (uint8_t *)fileEntryInfo.c_str());
+    }
+
+    return 0;
+}
+
+std::string FS::getAccessRightsAndFirstBlk(std::string fileName, int &first_blk)
+{
+    std::string rValue = "";
+
+    char directoryText[BLOCK_SIZE];
+    disk.read(currentDirectory.block, (uint8_t *)&directoryText);
+    char issText[BLOCK_SIZE + 1];
+    memcpy(issText, directoryText, BLOCK_SIZE);
+    issText[BLOCK_SIZE] = '\0';
+
+    std::istringstream iss(issText);
+    iss.seekg(iss.str().find(fileName), std::ios_base::beg);
+    std::string word;
+    iss >> word; // Name
+    iss >> word; // Size
+    iss >> word; // FirstBlk
+    first_blk = std::stoi(word);
+    iss >> word; // Type
+    iss >> word; // AccessRights
+
+    switch (std::stoi(word))
+    {
+    case 0:
+        rValue = "---";
+        break;
+    case 1:
+        rValue = "--X";
+        break;
+    case 2:
+        rValue = "-W-";
+        break;
+    case 3:
+        rValue = "-WX";
+        break;
+    case 4:
+        rValue = "R--";
+        break;
+    case 5:
+        rValue = "R-X";
+        break;
+    case 6:
+        rValue = "RW-";
+        break;
+    case 7:
+        rValue = "RWX";
+        break;
+    }
+
+    return rValue;
 }
 
 // formats the disk, i.e., creates an empty file system
 int FS::format()
 {
-    std::cout << "FS::format()\n"; // Remove
-
     // Initialize all the blocks in the FAT as free except block 0 and block 1
     for (int i = 0; i < BLOCK_SIZE / 2; i++)
     {
@@ -321,8 +480,6 @@ int FS::format()
 // written on the following rows (ended with an empty row)
 int FS::create(std::string filepath)
 {
-    std::cout << "FS::create(" << filepath << ")\n"; // Remove
-
     // Check if no file with the same name exists.
     if (!fileExists(currentDirectory.block, filepath))
     {
@@ -463,8 +620,6 @@ int FS::create(std::string filepath)
 // cat <filepath> reads the content of a file and prints it on the screen
 int FS::cat(std::string filepath)
 {
-    std::cout << "FS::cat(" << filepath << ")\n"; // Remove
-
     // Check if a file with the name exists
     if (fileExists(currentDirectory.block, filepath))
     {
@@ -568,8 +723,6 @@ int FS::ls()
 // <sourcepath> to a new file <destpath>
 int FS::cp(std::string sourcepath, std::string destpath)
 {
-    std::cout << "FS::cp(" << sourcepath << "," << destpath << ")\n"; // Remove
-
     /*
         1. Check if source file exists
         2. Check if the destpath is a directory or not
@@ -578,19 +731,14 @@ int FS::cp(std::string sourcepath, std::string destpath)
         5. Copy file to currentDirectory with another name or copy file to the directory we found in the current directory.
     */
 
-   //1. 
-    bool sourceFileExists = false;
-    if (fileExists(currentDirectory.block, sourcepath))
-    {
-        sourceFileExists = true;
-    }
-    else
+    // 1.
+    if (!fileExists(currentDirectory.block, sourcepath))
     {
         std::cout << "Error: Attempt to copy non-existing file" << std::endl;
         return -1;
     }
 
-    //2. 
+    // 2.
     bool directory = false;
     int directoryBlock = ROOT_BLOCK;
     if (destpath[0] == '/')
@@ -617,7 +765,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
         }
     }
 
-    //3.
+    // 3.
     if (directory) // Guaranteed to copy file into another directory
     {
         if (!fileExists(directoryBlock, sourcepath))
@@ -638,19 +786,8 @@ int FS::cp(std::string sourcepath, std::string destpath)
     }
     else // Could be to copy into a directory or file in currentDirectory
     {
-        //4.
-        if (!fileExists(currentDirectory.block, destpath)) // No file with name wanted found.
-        {
-            std::string fileData = readFile(sourcepath);
-            if (fileData == "")
-            {
-                std::cout << "Error: Read access denied" << std::endl;
-                return -3;
-            }
-            //5.
-            return copyFile(fileData, destpath, currentDirectory.block);
-        }
-        else if (directoryExists(currentDirectory.block, destpath, directoryBlock)) // Copy file into the directory if a file with the same name doesn't exist.
+        // 4.
+        if (directoryExists(currentDirectory.block, destpath, directoryBlock)) // Copy file into the directory if a file with the same name doesn't exist.
         {
             if (!fileExists(directoryBlock, sourcepath))
             {
@@ -660,7 +797,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
                     std::cout << "Error: Read access denied" << std::endl;
                     return -3;
                 }
-                //5.
+                // 5.
                 return copyFile(fileData, sourcepath, directoryBlock);
             }
             else
@@ -668,6 +805,17 @@ int FS::cp(std::string sourcepath, std::string destpath)
                 std::cout << "Error: Destination name already taken" << std::endl;
                 return -2;
             }
+        }
+        else if (!fileExists(currentDirectory.block, destpath)) // No file with name wanted found.
+        {
+            std::string fileData = readFile(sourcepath);
+            if (fileData == "")
+            {
+                std::cout << "Error: Read access denied" << std::endl;
+                return -3;
+            }
+            // 5.
+            return copyFile(fileData, destpath, currentDirectory.block);
         }
         else
         {
@@ -682,7 +830,68 @@ int FS::cp(std::string sourcepath, std::string destpath)
 // or moves the file <sourcepath> to the directory <destpath> (if dest is a directory)
 int FS::mv(std::string sourcepath, std::string destpath)
 {
-    std::cout << "FS::mv(" << sourcepath << "," << destpath << ")\n"; // Remove
+    // Check if sourcefile exists.
+    if (!fileExists(currentDirectory.block, sourcepath))
+    {
+        std::cout << "Error: Attempt to move/rename non-existing file" << std::endl;
+        return -1;
+    }
+
+    // Check if destpath is a directory
+    bool directory = false;
+    int directoryBlock = ROOT_BLOCK;
+    if (destpath[0] == '/')
+    {
+        directory = true;
+        for (int i = 0; i < directoryList.size(); i++)
+        {
+            if (destpath == directoryList[i].name)
+            {
+                directoryBlock = directoryList[i].block;
+                break;
+            }
+        }
+    }
+    else if (destpath == "..")
+    {
+        directory = true;
+        for (int i = 0; i < directoryList.size(); i++)
+        {
+            if (currentDirectory.parent == directoryList[i].name)
+            {
+                directoryBlock = directoryList[i].block;
+            }
+        }
+    }
+
+    if (directory) // Move file to another directory
+    {
+        if (!fileExists(directoryBlock, sourcepath))
+        {
+            return moveFile(sourcepath, "", directoryBlock, false);
+        }
+        else
+        {
+            std::cout << "Error: Destination name already taken" << std::endl;
+            return -2;
+        }
+    }
+    else
+    {
+        if (directoryExists(currentDirectory.block, destpath, directoryBlock)) // Check if directory is in the current directory
+        {
+            return moveFile(sourcepath, "", directoryBlock, false);
+        }
+        else if (!fileExists(currentDirectory.block, destpath)) // No file with the name selected was found in the directory
+        {
+            return moveFile(sourcepath, destpath, currentDirectory.block, true);
+        }
+        else
+        {
+            std::cout << "Error: Destination name already taken" << std::endl;
+            return -2;
+        }
+    }
 
     return 0;
 }
@@ -690,7 +899,72 @@ int FS::mv(std::string sourcepath, std::string destpath)
 // rm <filepath> removes / deletes the file <filepath>
 int FS::rm(std::string filepath)
 {
-    std::cout << "FS::rm(" << filepath << ")\n"; // Remove
+    // Check if file exists.
+    if (!fileExists(currentDirectory.block, filepath))
+    {
+        std::cout << "Error: Attempt to remove non-existing file" << std::endl;
+        return -1;
+    }
+
+    // Reconstruct the directory to not include the file but keep track of first block so we can free up all the FAT slots used.
+    char directoryText[BLOCK_SIZE];
+    disk.read(currentDirectory.block, (uint8_t *)&directoryText);
+    char issText[BLOCK_SIZE + 1];
+    memcpy(issText, directoryText, BLOCK_SIZE);
+    issText[BLOCK_SIZE] = '\0';
+
+    std::istringstream iss(issText);
+    std::string word;
+    std::string dirNew;
+    int index = 0;
+    int firstBlk = 0;
+
+    while (iss >> word)
+    {
+        if (word == filepath)
+        {
+            index++;
+        }
+        else if (index == 0)
+        {
+            dirNew += word + "\n";
+        }
+        else
+        {
+            index++;
+            if (index == 3) // First block
+            {
+                firstBlk = std::stoi(word);
+            }
+            else if (index == 5)
+            {
+                index = 0;
+            }
+        }
+    }
+
+    clearDiskBlock(currentDirectory.block);
+    disk.write(currentDirectory.block, (uint8_t *)dirNew.c_str());
+
+    // Update the fat slots used.
+    bool cleared = false;
+    while (cleared == false)
+    {
+        if (fat[firstBlk] == FAT_EOF) // Last slot for the file
+        {
+            fat[firstBlk] = FAT_FREE;
+            cleared = true;
+        }
+        else
+        {
+            int nextBlk = fat[firstBlk];
+            fat[firstBlk] = FAT_FREE;
+            firstBlk = nextBlk;
+        }
+    }
+
+    updateFat();
+
     return 0;
 }
 
@@ -698,7 +972,155 @@ int FS::rm(std::string filepath)
 // the end of file <filepath2>. The file <filepath1> is unchanged.
 int FS::append(std::string filepath1, std::string filepath2)
 {
-    std::cout << "FS::append(" << filepath1 << "," << filepath2 << ")\n"; // Remove
+    // Check if both files exist
+    if (fileExists(currentDirectory.block, filepath1) && fileExists(currentDirectory.block, filepath2))
+    {
+        // Check if we can read the contents of file1
+        std::string file1Content = readFile(filepath1);
+        int newSize = file1Content.size();
+        if (file1Content == "")
+        {
+            std::cout << "Error: File1 doesn't have read rights or is empty." << std::endl;
+            return -2;
+        }
+
+        // Check if we have write access on file2
+        int block;
+        if (getAccessRightsAndFirstBlk(filepath2, block).find("W") == std::string::npos)
+        {
+            std::cout << "Error: File2 doesn't have write access." << std::endl;
+            return -3;
+        }
+
+        // Find the last block used by file2.
+        while (fat[block] != FAT_EOF)
+        {
+            block = fat[block];
+        }
+
+        // Read the data on the EOF block.
+        char eofBlockData[BLOCK_SIZE];
+        disk.read(block, (uint8_t *)&eofBlockData);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, eofBlockData, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+
+        std::istringstream iss(issText);
+        std::string word;
+        std::string contents = "";
+        while (iss >> word)
+        {
+            contents += word + " ";
+        }
+        contents[contents.size() - 1] = '\n';
+
+        // Get the size of the contents so we know how much to add to it until it's full
+        int dataUntilFull = BLOCK_SIZE - contents.size();
+        contents += file1Content.substr(0, dataUntilFull); // Adds the letters required to fill up the block to the contents string
+        file1Content.erase(0, dataUntilFull);              // Erase the letters used up from file1 content.
+
+        // Write the new data to the block.
+        clearDiskBlock(block);
+        disk.write(block, (uint8_t *)contents.c_str());
+
+        if (file1Content.size() > 0) // If file1 still has content to append find new blocks.
+        {
+            int reqDiskBlocks = (file1Content.size() / BLOCK_SIZE) + 1;
+
+            int freeDiskBlockIndex[reqDiskBlocks];
+            for (int i = 0; i < reqDiskBlocks; i++)
+            {
+                freeDiskBlockIndex[i] = 0;
+            }
+            int arrayIndex = 0;
+            for (int i = 2; i < (BLOCK_SIZE / 2); i++) // First two blocks are never available.
+            {
+                if (fat[i] == FAT_FREE)
+                {
+                    freeDiskBlockIndex[arrayIndex] = i;
+                    arrayIndex++;
+
+                    if (freeDiskBlockIndex[(reqDiskBlocks - 1)] != 0)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (freeDiskBlockIndex[(reqDiskBlocks - 1)] == 0) // Amount of free disk blocks required couldn't be found.
+            {
+                std::cout << "Error: Not enough free disk blocks" << std::endl;
+                return -4;
+            }
+
+            char blockData[BLOCK_SIZE];      // The block data to transfer.
+            int totalFileDataTransfered = 0; // Keeps track of how much file data has been transfered.
+            for (int i = 0; i < reqDiskBlocks; i++)
+            {
+                memset(blockData, ' ', BLOCK_SIZE);
+                int fileDataTransfered = std::min(BLOCK_SIZE, static_cast<int>(file1Content.size() - totalFileDataTransfered));
+                std::copy(file1Content.begin() + totalFileDataTransfered, file1Content.begin() + totalFileDataTransfered + fileDataTransfered, blockData);
+                totalFileDataTransfered += fileDataTransfered;
+
+                disk.write(freeDiskBlockIndex[i], (uint8_t *)blockData);
+            }
+
+            // Update the FAT since more blocks were added
+            fat[block] = freeDiskBlockIndex[0];
+            for (int i = 0; i < reqDiskBlocks; i++)
+            {
+                if (i == (reqDiskBlocks - 1))
+                {
+                    fat[freeDiskBlockIndex[i]] = FAT_EOF;
+                }
+                else
+                {
+                    fat[freeDiskBlockIndex[i]] = fat[freeDiskBlockIndex[(i + 1)]];
+                }
+            }
+            updateFat();
+        }
+
+        // Update the directory entry to match the new size of the file.
+        iss.clear();
+        char directoryText[BLOCK_SIZE];
+        disk.read(currentDirectory.block, (uint8_t *)&directoryText);
+        memset(issText, ' ', BLOCK_SIZE + 1);
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+
+        iss.str(issText);
+        word = "";
+        std::string dirNew;
+        int index = 0;
+
+        while (iss >> word)
+        {
+            if (word == filepath2) // Finds the name
+            {
+                dirNew += word + "\n";
+                index++;
+            }
+            else if (index == 0) // Everything else
+            {
+                dirNew += word + "\n";
+            }
+            else // Size comes after name
+            {
+                newSize += std::stoi(word); // File1Content size + Current file size
+                dirNew += std::to_string(newSize) + "\n";
+                index = 0;
+            }
+        }
+
+        clearDiskBlock(currentDirectory.block);
+        disk.write(currentDirectory.block, (uint8_t *)dirNew.c_str());
+    }
+    else
+    {
+        std::cout << "Error: One of the files do not exist" << std::endl;
+        return -1;
+    }
     return 0;
 }
 

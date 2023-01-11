@@ -52,6 +52,8 @@ private:
     bool fileReadable(std::string fileName, int &first_blk);
     std::string readFile(std::string fileName);
     int copyFile(std::string fileData, std::string destName, int destDir);
+    int moveFile(std::string fileName, std::string newFileName, int destDir, bool rename);
+    std::string getAccessRightsAndFirstBlk(std::string fileName, int& first_blk);
 
 public:
     FS();

@@ -36,7 +36,7 @@ struct directory {
 
     directory() : block(0), name(""), parent("") { }
 
-    directory(int b, std::string n, std::string p) : block(b), name(n), parent(p) { }
+    directory(const int b, const std::string n, const std::string p) : block(b), name(n), parent(p) { }
 };
 
 class FS {

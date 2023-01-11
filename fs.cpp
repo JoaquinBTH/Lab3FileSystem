@@ -966,7 +966,6 @@ int FS::mv(std::string sourcepath, std::string destpath)
 // rm <filepath> removes / deletes the file <filepath>
 int FS::rm(std::string filepath)
 {
-
     // Check if it's a directory that's not the root directory
     bool removeDirectory = false;
     int directoryIndex = 0;
@@ -1022,7 +1021,6 @@ int FS::rm(std::string filepath)
         word = "";
         std::string dirNew;
         int index = 0;
-        int firstBlk = 0;
 
         while (iss >> word)
         {
@@ -1463,7 +1461,6 @@ int FS::cd(std::string dirpath)
 // directory, including the currect directory name
 int FS::pwd()
 {
-
     std::cout << directoryList[currentDirectoryIndex].name << std::endl;
 
     return 0;

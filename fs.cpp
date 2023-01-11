@@ -89,7 +89,7 @@ bool FS::directoryExists(int dir, std::string dirName, int &dirBlock)
         dirBlock = std::stoi(word);
         iss >> word;
 
-        if(word == "1") //If the type is directory
+        if (word == "1") // If the type is directory
         {
             rValue = true;
         }
@@ -436,6 +436,49 @@ std::string FS::getAccessRightsAndFirstBlk(std::string fileName, int &first_blk)
     return rValue;
 }
 
+void FS::directoryParser(std::string input, std::string &parent, std::string &fullName, std::string &isolatedName)
+{
+    std::vector<std::string> parts;
+    std::string currentString = "";
+
+    for (int i = 0; i < input.size(); i++)
+    {
+        if (input[i] == '/' || (i == (input.size() - 1))) // Whenever "/" is encountered or it's the end of the input.
+        {
+            if (currentString == ".." && parts.size() > 0) // If ".." was found and we can go back one directory, then do so.
+            {
+                parts.pop_back();
+            }
+            else if (currentString != "") // If currentString is not empty we add it to the parts.
+            {
+                parts.push_back(currentString);
+            }
+            currentString = "";
+        }
+        else // Add letter to the string.
+        {
+            currentString += input[i];
+        }
+    }
+
+    parent = "/"; // Always root directory at least
+    for (int i = 0; i < parts.size() - 1; i++)
+    {
+        if (i == 0)
+        {
+            parent += parts[i];
+        }
+        else
+        {
+            parent += "/" + parts[i];
+        }
+    }
+
+    isolatedName = parts[parts.size() - 1];
+
+    fullName = parent + "/" + isolatedName;
+}
+
 // formats the disk, i.e., creates an empty file system
 int FS::format()
 {
@@ -660,7 +703,14 @@ int FS::ls()
             content += word + "\t"; // Name
             break;
         case 1:
-            content += word + "\t"; // Size
+            if (std::stoi(word) == -1)
+            {
+                content += "-\t"; // Size Dir
+            }
+            else
+            {
+                content += word + "\t"; // Size File
+            }
             break;
         case 2:
             content += word + "\t"; // InitBlock
@@ -734,11 +784,11 @@ int FS::cp(std::string sourcepath, std::string destpath)
     }
 
     // 2.
-    bool directory = false;
+    bool directoryBool = false;
     int directoryBlock = ROOT_BLOCK;
     if (destpath[0] == '/')
     {
-        directory = true;
+        directoryBool = true;
         for (int i = 0; i < directoryList.size(); i++)
         {
             if (destpath == directoryList[i].name)
@@ -750,7 +800,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
     }
     else if (destpath == "..")
     {
-        directory = true;
+        directoryBool = true;
         for (int i = 0; i < directoryList.size(); i++)
         {
             if (currentDirectory.parent == directoryList[i].name)
@@ -761,7 +811,7 @@ int FS::cp(std::string sourcepath, std::string destpath)
     }
 
     // 3.
-    if (directory) // Guaranteed to copy file into another directory
+    if (directoryBool) // Guaranteed to copy file into another directory
     {
         if (!fileExists(directoryBlock, sourcepath))
         {
@@ -833,11 +883,11 @@ int FS::mv(std::string sourcepath, std::string destpath)
     }
 
     // Check if destpath is a directory
-    bool directory = false;
+    bool directoryBool = false;
     int directoryBlock = ROOT_BLOCK;
     if (destpath[0] == '/')
     {
-        directory = true;
+        directoryBool = true;
         for (int i = 0; i < directoryList.size(); i++)
         {
             if (destpath == directoryList[i].name)
@@ -849,7 +899,7 @@ int FS::mv(std::string sourcepath, std::string destpath)
     }
     else if (destpath == "..")
     {
-        directory = true;
+        directoryBool = true;
         for (int i = 0; i < directoryList.size(); i++)
         {
             if (currentDirectory.parent == directoryList[i].name)
@@ -859,7 +909,7 @@ int FS::mv(std::string sourcepath, std::string destpath)
         }
     }
 
-    if (directory) // Move file to another directory
+    if (directoryBool) // Move file to another directory
     {
         if (!fileExists(directoryBlock, sourcepath))
         {
@@ -894,71 +944,170 @@ int FS::mv(std::string sourcepath, std::string destpath)
 // rm <filepath> removes / deletes the file <filepath>
 int FS::rm(std::string filepath)
 {
-    // Check if file exists.
-    if (!fileExists(currentDirectory.block, filepath))
+
+    // Check if it's a directory that's not the root directory
+    bool removeDirectory = false;
+    int directoryIndex = 0;
+    for (int i = 0; i < directoryList.size(); i++)
     {
-        std::cout << "Error: Attempt to remove non-existing file" << std::endl;
-        return -1;
+        if (filepath == directoryList[i].name && filepath != "/")
+        {
+            removeDirectory = true;
+            directoryIndex = i;
+            break;
+        }
     }
 
-    // Reconstruct the directory to not include the file but keep track of first block so we can free up all the FAT slots used.
-    char directoryText[BLOCK_SIZE];
-    disk.read(currentDirectory.block, (uint8_t *)&directoryText);
-    char issText[BLOCK_SIZE + 1];
-    memcpy(issText, directoryText, BLOCK_SIZE);
-    issText[BLOCK_SIZE] = '\0';
-
-    std::istringstream iss(issText);
-    std::string word;
-    std::string dirNew;
-    int index = 0;
-    int firstBlk = 0;
-
-    while (iss >> word)
+    if (removeDirectory)
     {
-        if (word == filepath)
+        // Check if directory is empty
+        char directoryText[BLOCK_SIZE];
+        disk.read(directoryList[directoryIndex].block, (uint8_t *)&directoryText);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+        std::istringstream iss(issText);
+        std::string word;
+        while (iss >> word)
         {
-            index++;
+            std::cout << "Error: Directory isn't empty" << std::endl;
+            return -1;
         }
-        else if (index == 0)
+
+        // Reconstruct the parent directory to not have the directory
+        iss.clear();
+        memset(issText, ' ', BLOCK_SIZE + 1);
+        memset(directoryText, ' ', BLOCK_SIZE);
+        int parentBlock = ROOT_BLOCK;
+        for(int i = 0; i < directoryList.size(); i++)
         {
-            dirNew += word + "\n";
-        }
-        else
-        {
-            index++;
-            if (index == 3) // First block
+            if(directoryList[directoryIndex].parent == directoryList[i].name)
             {
-                firstBlk = std::stoi(word);
+                parentBlock = i;
+                break;
             }
-            else if (index == 5)
+        }
+        disk.read(parentBlock, (uint8_t *)&directoryText);
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+
+        std::string parent;
+        std::string fullDirName;
+        std::string dirName;
+        directoryParser(filepath, parent, fullDirName, dirName); //Get the dirName so we can use it to find when it's seen in the directory.
+
+        iss.str(issText);
+        word = "";
+        std::string dirNew;
+        int index = 0;
+        int firstBlk = 0;
+
+        while (iss >> word)
+        {
+            if (word == dirName)
             {
-                index = 0;
+                index++;
+            }
+            else if (index == 0)
+            {
+                dirNew += word + "\n";
+            }
+            else
+            {
+                index++;
+                if (index == 5)
+                {
+                    index = 0;
+                }
             }
         }
+
+        clearDiskBlock(parentBlock);
+        disk.write(parentBlock, (uint8_t *)dirNew.c_str());
+
+        //Update FAT
+        fat[directoryList[directoryIndex].block] = FAT_FREE;
+        updateFat();
+
+        //Remove the directory from directory list and if it's the currentDirectory, switch to root directory
+        directoryList.erase(directoryList.begin() + directoryIndex);
+        if(currentDirectory.name == fullDirName)
+        {
+            currentDirectory.block = ROOT_BLOCK;
+            memset(currentDirectory.name, 0, 256);
+            memset(currentDirectory.parent, 0, 256);
+            strcpy(currentDirectory.name, "/");
+            strcpy(currentDirectory.parent, "");
+        }
     }
-
-    clearDiskBlock(currentDirectory.block);
-    disk.write(currentDirectory.block, (uint8_t *)dirNew.c_str());
-
-    // Update the fat slots used.
-    bool cleared = false;
-    while (cleared == false)
+    else
     {
-        if (fat[firstBlk] == FAT_EOF) // Last slot for the file
+        // Check if file exists.
+        if (!fileExists(currentDirectory.block, filepath))
         {
-            fat[firstBlk] = FAT_FREE;
-            cleared = true;
+            std::cout << "Error: Attempt to remove non-existing file" << std::endl;
+            return -2;
         }
-        else
-        {
-            int nextBlk = fat[firstBlk];
-            fat[firstBlk] = FAT_FREE;
-            firstBlk = nextBlk;
-        }
-    }
 
-    updateFat();
+        // Reconstruct the directory to not include the file but keep track of first block so we can free up all the FAT slots used.
+        char directoryText[BLOCK_SIZE];
+        disk.read(currentDirectory.block, (uint8_t *)&directoryText);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+
+        std::istringstream iss(issText);
+        std::string word;
+        std::string dirNew;
+        int index = 0;
+        int firstBlk = 0;
+
+        while (iss >> word)
+        {
+            if (word == filepath)
+            {
+                index++;
+            }
+            else if (index == 0)
+            {
+                dirNew += word + "\n";
+            }
+            else
+            {
+                index++;
+                if (index == 3) // First block
+                {
+                    firstBlk = std::stoi(word);
+                }
+                else if (index == 5)
+                {
+                    index = 0;
+                }
+            }
+        }
+
+        clearDiskBlock(currentDirectory.block);
+        disk.write(currentDirectory.block, (uint8_t *)dirNew.c_str());
+
+        // Update the fat slots used.
+        bool cleared = false;
+        while (cleared == false)
+        {
+            if (fat[firstBlk] == FAT_EOF) // Last slot for the file
+            {
+                fat[firstBlk] = FAT_FREE;
+                cleared = true;
+            }
+            else
+            {
+                int nextBlk = fat[firstBlk];
+                fat[firstBlk] = FAT_FREE;
+                firstBlk = nextBlk;
+            }
+        }
+
+        updateFat();
+    }
 
     return 0;
 }
@@ -1123,14 +1272,169 @@ int FS::append(std::string filepath1, std::string filepath2)
 // in the current directory
 int FS::mkdir(std::string dirpath)
 {
-    std::cout << "FS::mkdir(" << dirpath << ")\n"; // Remove
+    // Parse the name because it can be like "d1", "/d1", "d1/d2/../d3", "/d1/d2/../d3" and it should still be able to keep track of the correct name.
+    std::string parentName;
+    std::string dirFullName;
+    std::string dirName;
+
+    if (dirpath[0] != '/') // Add a slash if the first letter is missing it for similar parsing.
+    {
+        dirpath = currentDirectory.name + '/' + dirpath;
+    }
+    else
+    {
+        dirpath = currentDirectory.name + dirpath;
+    }
+
+    directoryParser(dirpath, parentName, dirFullName, dirName);
+
+    bool parentExists = false;
+    int parentBlock = ROOT_BLOCK;
+    for (int i = 0; i < directoryList.size(); i++)
+    {
+        if (parentName == directoryList[i].name)
+        {
+            parentBlock = directoryList[i].block;
+            parentExists = true;
+            break;
+        }
+    }
+
+    if (parentExists)
+    {
+        int throwaway;
+        if (directoryExists(parentBlock, dirName, throwaway))
+        {
+            std::cout << "Error: Directory with same name already exists" << std::endl;
+            return -2;
+        }
+
+        // Check if the dirName is too big for the buffer.
+        if (dirName.size() > 55)
+        {
+            std::cout << "Error: Dirname too big" << std::endl;
+            return -3;
+        }
+
+        // Check if the directory is full or not (64 entries max per directory).
+        char directoryText[BLOCK_SIZE];
+        disk.read(parentBlock, (uint8_t *)&directoryText);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+        std::istringstream iss(issText);
+        std::string word;
+        int entries = 0;
+        while (iss >> word)
+        {
+            entries++;
+        }
+        if (entries / 5 > 63)
+        {
+            std::cout << "Error: Directory full" << std::endl;
+            return -4;
+        }
+
+        // Assign a free disk block to the directory.
+        int diskBlockIndex = 0;
+        for (int i = 2; i < BLOCK_SIZE / 2; i++)
+        {
+            if (fat[i] == FAT_FREE)
+            {
+                diskBlockIndex = i;
+                break;
+            }
+        }
+
+        if (diskBlockIndex == 0)
+        {
+            std::cout << "Error: No free disk blocks found" << std::endl;
+            return -5;
+        }
+
+        // Create a dir_entry of the type directory
+        dir_entry directoryEntry;
+        strcpy(directoryEntry.file_name, dirName.c_str());
+        directoryEntry.size = -1;
+        directoryEntry.first_blk = diskBlockIndex;
+        directoryEntry.type = 1;
+        directoryEntry.access_rights = READ + WRITE;
+
+        // Add the dir_entry to the parent directory
+        std::string dirNew = directoryEntry.file_name; // Otherwise name doesn't get added for some reason.
+        dirNew += '\n' + std::to_string(directoryEntry.size) + '\n' + std::to_string(directoryEntry.first_blk) + '\n' +
+                  std::to_string(directoryEntry.type) + '\n' + std::to_string(directoryEntry.access_rights) + '\n';
+        char dirOriginal[BLOCK_SIZE];
+        disk.read(parentBlock, (uint8_t *)&dirOriginal);
+        dirNew += dirOriginal;
+        clearDiskBlock(parentBlock);
+        disk.write(parentBlock, (uint8_t *)dirNew.c_str());
+
+        // Update the fat
+        fat[diskBlockIndex] = FAT_EOF;
+        updateFat();
+
+        // Add the new directory to the list of directories that exist.
+        directory newEntry;
+        newEntry.block = diskBlockIndex;
+        strcpy(newEntry.name, dirFullName.c_str());
+        strcpy(newEntry.parent, parentName.c_str());
+        directoryList.push_back(newEntry);
+    }
+    else
+    {
+        std::cout << "Error: Cannot create a directory in a non-existant parent directory" << std::endl;
+        return -1;
+    }
+
     return 0;
 }
 
 // cd <dirpath> changes the current (working) directory to the directory named <dirpath>
 int FS::cd(std::string dirpath)
 {
-    std::cout << "FS::cd(" << dirpath << ")\n"; // Remove
+    if (dirpath[0] != '/') // Add a slash if the first letter is missing it for similar parsing.
+    {
+        dirpath = currentDirectory.name + '/' + dirpath;
+    }
+    else
+    {
+        dirpath = currentDirectory.name + dirpath;
+    }
+
+    std::string dirFullName;
+    std::string parent;
+    std::string dir;
+
+    directoryParser(dirpath, parent, dirFullName, dir);
+
+    // Find the directory we want to switch to and change the currentDirectory to match that.
+    bool found = false;
+    for (int i = 0; i < directoryList.size(); i++)
+    {
+        if (dirFullName == directoryList[i].name)
+        {
+            if (directoryList[i].name == currentDirectory.name)
+            {
+                std::cout << "Error: You're already located in this directory" << std::endl;
+                return -1;
+            }
+            currentDirectory.block = directoryList[i].block;
+            memset(currentDirectory.name, 0, 256);
+            memset(currentDirectory.parent, 0, 256);
+            strcpy(currentDirectory.name, directoryList[i].name);
+            strcpy(currentDirectory.parent, directoryList[i].parent);
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+    {
+        std::cout << "Error: Directory doesn't exist" << std::endl;
+        return -2;
+    }
+
     return 0;
 }
 
@@ -1138,7 +1442,9 @@ int FS::cd(std::string dirpath)
 // directory, including the currect directory name
 int FS::pwd()
 {
-    std::cout << "FS::pwd()\n"; // Remove
+
+    std::cout << currentDirectory.name << std::endl;
+
     return 0;
 }
 

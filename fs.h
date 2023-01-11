@@ -54,6 +54,7 @@ private:
     int copyFile(std::string fileData, std::string destName, int destDir);
     int moveFile(std::string fileName, std::string newFileName, int destDir, bool rename);
     std::string getAccessRightsAndFirstBlk(std::string fileName, int& first_blk);
+    void directoryParser(std::string input, std::string& parent, std::string& fullName, std::string& isolatedName);
 
 public:
     FS();

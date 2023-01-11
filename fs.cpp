@@ -149,17 +149,12 @@ std::string FS::readFile(std::string fileName)
             addContent[BLOCK_SIZE] = '\0';
             std::istringstream iss(addContent);
 
-            std::string addString = diskContent;
-
-            rString += addString.substr(0, addString.size());
-            /*
             std::string word;
             while (iss >> word)
             {
-                rString += word + " ";
+                rString += word + iss.str()[iss.tellg()];
             }
             word.pop_back(); // Erase the last space.
-            */
 
             if (fat[blk] == FAT_EOF)
             {
@@ -340,7 +335,7 @@ int FS::moveFile(std::string fileName, std::string newFileName, int destDir, boo
         }
 
         // Now reconstruct currentDirectory to not have the file and keep track of the file entry.
-        iss.str("");
+        iss.clear();
         memset(directoryText, ' ', BLOCK_SIZE);
         memset(issText, ' ', BLOCK_SIZE + 1);
         disk.read(currentDirectory.block, (uint8_t *)&directoryText);
@@ -626,7 +621,7 @@ int FS::cat(std::string filepath)
         std::string fileContent = readFile(filepath);
         if (fileContent != "")
         {
-            std::cout << fileContent << std::endl;
+            std::cout << fileContent;
         }
         else
         {

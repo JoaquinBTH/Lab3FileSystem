@@ -47,7 +47,7 @@ private:
 
     //Self-made variables
     int currentDirectoryIndex = 0;
-    std::vector<directory> directoryList;
+    std::vector<directory> *directoryList;
 
     //Self-made functions
     void updateFat();

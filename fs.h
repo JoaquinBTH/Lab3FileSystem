@@ -54,11 +54,11 @@ private:
     void clearDiskBlock(int blk);
     bool fileExists(int dir, std::string fileName);
     bool directoryExists(int dir, std::string dirName, int& dirBlock);
-    bool fileReadable(std::string fileName, int &first_blk);
-    std::string readFile(std::string fileName);
-    int copyFile(std::string fileData, std::string destName, int destDir);
-    int moveFile(std::string fileName, std::string newFileName, int destDir, bool rename);
-    std::string getAccessRightsAndFirstBlk(std::string fileName, int& first_blk);
+    bool fileReadable(std::string fileName, int directoryIndex, int &first_blk);
+    std::string readFile(std::string fileName, int directoryIndex);
+    int copyFile(std::string fileData, std::string destName, int destBlock);
+    int moveFile(std::string fileName, std::string newFileName, int sourceBlock, int destBlock, bool rename);
+    std::string getAccessRightsAndFirstBlk(std::string fileName, int directoryIndex, int& first_blk);
     void directoryParser(std::string input, std::string& parent, std::string& fullName, std::string& isolatedName);
 
 public:

@@ -1472,5 +1472,75 @@ int FS::pwd()
 int FS::chmod(std::string accessrights, std::string filepath)
 {
     std::cout << "FS::chmod(" << accessrights << "," << filepath << ")\n"; // Remove
+
+    //Check if the file exists in the currentDirectory
+    if(fileExists(directoryList->at(currentDirectoryIndex).block, filepath))
+    {
+        //Get the integer value for the accessrights.
+        int accessint;
+        try{
+            accessint = std::stoi(accessrights);
+        } catch(const std::exception& e)
+        {
+            std::cout << "Error: Accessrights has the wrong format" << std::endl;
+            return -2;
+        }
+
+        if(accessint < 1 || accessint > 7)
+        {
+            std::cout << "Error: Invalid access rights" << std::endl;
+            return -3;
+        }
+
+        //Reconstruct the currentDirectory with the new access rights for the file.
+        char directoryText[BLOCK_SIZE];
+        disk.read(directoryList->at(currentDirectoryIndex).block, (uint8_t *)&directoryText);
+        char issText[BLOCK_SIZE + 1];
+        memcpy(issText, directoryText, BLOCK_SIZE);
+        issText[BLOCK_SIZE] = '\0';
+
+        std::istringstream iss(issText);
+        std::string word;
+        std::string dirNew;
+        int index = 0;
+
+        while (iss >> word)
+        {
+            if (word == filepath)
+            {
+                dirNew += word + "\n";
+                index++;
+            }
+            else if (index == 0)
+            {
+                dirNew += word + "\n";
+            }
+            else
+            {
+                index++;
+                if (index == 5) //Access rights
+                {
+                    dirNew += std::to_string(accessint) + "\n";
+                    index = 0;
+                }
+                else
+                {
+                    dirNew += word + "\n";
+                }
+            }
+        }
+
+        clearDiskBlock(directoryList->at(currentDirectoryIndex).block);
+        disk.write(directoryList->at(currentDirectoryIndex).block, (uint8_t *)dirNew.c_str());
+    }
+    else
+    {
+        std::cout << "Error: Attempt to chmod on non-existing file" << std::endl;
+        return -1;
+    }
+
+
+
+
     return 0;
 }

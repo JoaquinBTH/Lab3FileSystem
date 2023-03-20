@@ -372,7 +372,7 @@ int FS::copyFile(std::string fileData, std::string destName, int destBlock)
         }
         else
         {
-            fat[freeDiskBlockIndex[i]] = fat[freeDiskBlockIndex[(i + 1)]];
+            fat[freeDiskBlockIndex[i]] = freeDiskBlockIndex[(i + 1)];
         }
     }
     updateFat();
@@ -571,7 +571,7 @@ void FS::directoryParser(std::string input, std::string &parent, std::string &fu
     {
         parts.pop_back();
     }
-    else if (currentString != "")
+    else if (currentString != "" && currentString != "..")
     {
         parts.push_back(currentString);
     }
@@ -716,7 +716,7 @@ int FS::create(std::string filepath)
             }
             else
             {
-                fileData += input + "\n";
+                fileData += input + '\n';
             }
         }
 
@@ -730,7 +730,11 @@ int FS::create(std::string filepath)
         */
 
         // 1.
-        int reqDiskBlocks = (fileData.size() / BLOCK_SIZE) + 1;
+        int reqDiskBlocks = ((fileData.size() - 1) / BLOCK_SIZE) + 1;
+        if (reqDiskBlocks == 0) // If an empty file was created.
+        {
+            reqDiskBlocks = 1;
+        }
 
         // 2.
         int freeDiskBlockIndex[reqDiskBlocks];
@@ -803,7 +807,7 @@ int FS::create(std::string filepath)
             }
             else
             {
-                fat[freeDiskBlockIndex[i]] = fat[freeDiskBlockIndex[(i + 1)]];
+                fat[freeDiskBlockIndex[i]] = freeDiskBlockIndex[(i + 1)];
             }
         }
         updateFat();
@@ -925,6 +929,9 @@ int FS::ls()
             int Rights = std::stoi(word);
             switch (Rights)
             {
+            case 0:
+                content += "---\n"; // Nothing
+                break;
             case 1:
                 content += "--X\n"; // Execute
                 break;
@@ -1013,8 +1020,10 @@ int FS::cp(std::string sourcepath, std::string destpath)
     /*
         1. Check if source file exists
         2. Check if the destpath is a directory or not
-        3. If it is then create a copy of the file to that directory using the sourceFileName
-        4. If it isn't then we check if a file or directory with the same name exists, otherwise we create a copy in the same directory with the destFileName.
+        3. Check if the destParentDirectory is different from the currentDirectory.
+        4. If destpath is a directory, then create a copy of the file to that directory using the sourceFileName.
+        5. If destParentDirectory is different, then create a copy of the file to the correct directory using the selected name.
+        6. If it isn't a directory, then we check if a file or directory with the same name exists, otherwise we create a copy in the same directory with the destFileName.
     */
 
     // 1.
@@ -1033,10 +1042,26 @@ int FS::cp(std::string sourcepath, std::string destpath)
         {
             directoryBool = true;
             destDirectoryIndex = i;
+            break;
         }
     }
 
     // 3.
+    bool differentParent = false;
+    if (destParentDirectory != directoryList->at(currentDirectoryIndex).name) // If the parentDirectory is different from the currentDirectory.
+    {
+        for (int i = 0; i < directoryList->size(); i++)
+        {
+            if (destParentDirectory == directoryList->at(i).name) // If a parent with that name can be found
+            {
+                destDirectoryIndex = i;
+                differentParent = true;
+                break;
+            }
+        }
+    }
+
+    // 4.
     if (directoryBool) // Guaranteed to copy file into another directory using the original file name
     {
         int ref;
@@ -1049,6 +1074,25 @@ int FS::cp(std::string sourcepath, std::string destpath)
                 return -4;
             }
             return copyFile(fileData, sourceFileName, directoryList->at(destDirectoryIndex).block);
+        }
+        else
+        {
+            std::cout << "Error: Destination name already taken" << std::endl;
+            return -3;
+        }
+    }
+    else if (differentParent)
+    {
+        int ref;
+        if (!fileExists(directoryList->at(destDirectoryIndex).block, destFileName) && !directoryExists(directoryList->at(destDirectoryIndex).block, destFileName, ref))
+        {
+            std::string fileData = readFile(sourceFileName, sourceDirectoryIndex);
+            if (fileData == "")
+            {
+                std::cout << "Error: Read access denied" << std::endl;
+                return -4;
+            }
+            return copyFile(fileData, destFileName, directoryList->at(destDirectoryIndex).block);
         }
         else
         {
@@ -1146,6 +1190,23 @@ int FS::mv(std::string sourcepath, std::string destpath)
         {
             directoryBool = true;
             destDirectoryIndex = i;
+            break;
+        }
+    }
+
+    // Check if the destination has a different parent directory.
+    bool differentParent = false;
+    if (destParentDirectory != directoryList->at(currentDirectoryIndex).name) // If the parentDirectory is different from the currentDirectory.
+    {
+        for (int i = 0; i < directoryList->size(); i++)
+        {
+            if (destParentDirectory == directoryList->at(i).name) // If a parent with that name can be found
+            {
+                destDirectoryIndex = i;
+                differentParent = true;
+                directoryBool = false;
+                break;
+            }
         }
     }
 
@@ -1153,9 +1214,38 @@ int FS::mv(std::string sourcepath, std::string destpath)
     {
         int ref;
         // Check if destination name is taken
-        if (!fileExists(directoryList->at(destDirectoryIndex).block, sourceFileName) && !directoryExists(directoryList->at(sourceDirectoryIndex).block, sourceFileName, ref))
+        if (!fileExists(directoryList->at(destDirectoryIndex).block, sourceFileName) && !directoryExists(directoryList->at(destDirectoryIndex).block, sourceFileName, ref))
         {
             return moveFile(sourceFileName, "", directoryList->at(sourceDirectoryIndex).block, directoryList->at(destDirectoryIndex).block, false);
+        }
+        else
+        {
+            std::cout << "Error: Destination name already taken" << std::endl;
+            return -3;
+        }
+    }
+    else if (differentParent) // Move file to another directory and rename if destname is different.
+    {
+        int ref;
+        // Check if destination name is taken
+        if (!fileExists(directoryList->at(destDirectoryIndex).block, sourceFileName) && !directoryExists(directoryList->at(destDirectoryIndex).block, sourceFileName, ref))
+        {
+            if (moveFile(sourceFileName, "", directoryList->at(sourceDirectoryIndex).block, directoryList->at(destDirectoryIndex).block, false) == 0)
+            {
+                if (sourceFileName != destFileName)
+                {
+                    // Rename the file within the destination directory
+                    if (!fileExists(directoryList->at(destDirectoryIndex).block, destFileName) && !directoryExists(directoryList->at(destDirectoryIndex).block, destFileName, ref))
+                    {
+                        return moveFile(sourceFileName, destFileName, directoryList->at(destDirectoryIndex).block, directoryList->at(destDirectoryIndex).block, true);
+                    }
+                    else
+                    {
+                        std::cout << "Error: Destination name already taken, but file was moved successfully" << std::endl;
+                        return -2;
+                    }
+                }
+            }
         }
         else
         {
@@ -1295,7 +1385,8 @@ int FS::rm(std::string filepath)
         clearDiskBlock(directoryList->at(parentIndex).block);
         disk.write(directoryList->at(parentIndex).block, (uint8_t *)dirNew.c_str());
 
-        // Update FAT
+        // Update FAT and remove data from used disk block
+        clearDiskBlock(directoryList->at(directoryIndex).block);
         fat[directoryList->at(directoryIndex).block] = FAT_FREE;
         updateFat();
 
@@ -1362,16 +1453,17 @@ int FS::rm(std::string filepath)
         disk.write(directoryList->at(directoryIndex).block, (uint8_t *)dirNew.c_str());
 
         // Update the fat slots used.
-        bool cleared = false;
-        while (cleared == false)
+        while (1)
         {
             if (fat[firstBlk] == FAT_EOF) // Last slot for the file
             {
+                clearDiskBlock(firstBlk);
                 fat[firstBlk] = FAT_FREE;
-                cleared = true;
+                break;
             }
             else
             {
+                clearDiskBlock(firstBlk);
                 int nextBlk = fat[firstBlk];
                 fat[firstBlk] = FAT_FREE;
                 firstBlk = nextBlk;
@@ -1544,7 +1636,7 @@ int FS::append(std::string filepath1, std::string filepath2)
                 }
                 else
                 {
-                    fat[freeDiskBlockIndex[i]] = fat[freeDiskBlockIndex[(i + 1)]];
+                    fat[freeDiskBlockIndex[i]] = freeDiskBlockIndex[(i + 1)];
                 }
             }
             updateFat();
@@ -1822,7 +1914,7 @@ int FS::chmod(std::string accessrights, std::string filepath)
             return -3;
         }
 
-        if (accessint < 1 || accessint > 7)
+        if (accessint < 0 || accessint > 7)
         {
             std::cout << "Error: Invalid access rights" << std::endl;
             return -4;
